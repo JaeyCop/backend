@@ -21,6 +21,7 @@ class Recipe(BaseModel):
 
     average_rating: Optional[float] = None
     review_count: int = 0
+    cookbooks: List[Cookbook] = []
 
 
 class RecipeSearchResponse(BaseModel):
@@ -53,6 +54,10 @@ class SearchQuery(BaseModel):
     include_videos: bool = Field(default=True)
     difficulty_filter: Optional[str] = Field(default=None)
     max_time_minutes: Optional[int] = Field(default=None)
+    ingredients_filter: Optional[str] = Field(default=None, description="Comma-separated ingredients to filter by")
+    cuisine_filter: Optional[str] = Field(default=None, description="Cuisine type to filter by")
+    tags_filter: Optional[str] = Field(default=None, description="Comma-separated tags to filter by")
+    use_cache: bool = Field(default=True, description="Whether to use cached results")
 
 
 class RecipeRecommendationResponse(BaseModel):
@@ -67,13 +72,6 @@ class NutritionAnalysis(BaseModel):
     estimated_nutrition: Dict[str, Any]
     health_score: float
     dietary_tags: List[str]
-
-
-class MealPlan(BaseModel):
-    date: str
-    meals: Dict[str, Recipe]
-    total_nutrition: Dict[str, Any]
-    shopping_list: List[str]
 
 
 class VideoTutorial(BaseModel):

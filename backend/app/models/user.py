@@ -42,6 +42,12 @@ class User(Base):
     # Relationships
     ratings = relationship("Rating", back_populates="user", cascade="all, delete-orphan")
     reviews = relationship("Review", back_populates="user", cascade="all, delete-orphan")
+    cookbooks = relationship("Cookbook", back_populates="owner", cascade="all, delete-orphan")
+    following = relationship("Follow", foreign_keys="Follow.follower_id", back_populates="follower", cascade="all, delete-orphan")
+    followers = relationship("Follow", foreign_keys="Follow.followed_id", back_populates="followed", cascade="all, delete-orphan")
+    user_recipes = relationship("UserRecipe", back_populates="owner", cascade="all, delete-orphan")
+    meal_plans = relationship("MealPlan", back_populates="owner", cascade="all, delete-orphan")
+    notifications = relationship("Notification", foreign_keys="Notification.recipient_id", back_populates="recipient", cascade="all, delete-orphan")
     
     def __repr__(self):
         return f"<User(id={self.id}, email='{self.email}')>"

@@ -19,7 +19,15 @@ if config.config_file_name is not None:
 # from myapp import mymodel
 # target_metadata = mymodel.Base.metadata
 from app.db.session import Base
+from app.models.user import User
 from app.models.recipe import Recipe
+from app.models.rating import Rating
+from app.models.review import Review
+from app.models.cookbook import Cookbook
+from app.models.follow import Follow
+from app.models.user_recipe import UserRecipe
+from app.models.meal_plan import MealPlan
+from app.models.notification import Notification
 target_metadata = Base.metadata
 
 # other values from the config, defined by the needs of env.py,

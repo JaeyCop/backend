@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     ALGORITHM: str = "HS256"
+    SUPABASE_JWT_SECRET: str = os.getenv("SUPABASE_JWT_SECRET", "")
     
     # Database
     DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql://user:password@localhost/dbname")
@@ -25,9 +26,7 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
     YOUTUBE_API_KEY: Optional[str] = os.getenv("YOUTUBE_API_KEY")
     
-    # Redis/Cache
-    REDIS_URL: Optional[str] = os.getenv("REDIS_URL")
-    CACHE_TTL: int = 3600  # 1 hour
+    # Redis/Cache (removed for Fly.io optimization)
     
     # Rate Limiting
     RATE_LIMIT_PER_MINUTE: int = 60

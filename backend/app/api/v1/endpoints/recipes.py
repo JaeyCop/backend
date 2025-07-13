@@ -22,6 +22,8 @@ from app.services.scraper import scraper
 from app.services.video_scraper import video_scraper
 from pydantic import HttpUrl
 from app.crud.recipe import get_recipe_by_url, create_recipe, get_recipes_by_query
+from app.services.ai_service import ai_service
+from app.core.settings import settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -37,9 +39,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def generate_cache_key(query: str, max_results: int = 10, include_videos: bool = True) -> str:
-    """Generate cache key for search queries."""
-    return hashlib.md5(f"{query}:{max_results}:{include_videos}".encode()).hexdigest()
+
 
 
 @router.get("/search", response_model=RecipeSearchResponse)
@@ -48,13 +48,17 @@ async def search_recipes(
         limit: int = Query(default=10, ge=1, le=50, description="Maximum number of results"),
         use_cache: bool = Query(default=True, description="Whether to use cached results"),
         include_videos: bool = Query(default=True, description="Include video tutorials"),
+        ingredients: Optional[str] = Query(default=None, description="Comma-separated ingredients to filter by"),
+        cuisine: Optional[str] = Query(default=None, description="Cuisine type to filter by"),
+        difficulty: Optional[str] = Query(default=None, description="Difficulty level to filter by"),
+        tags: Optional[str] = Query(default=None, description="Comma-separated tags to filter by"),
         db: AsyncSession = Depends(get_db)
 ):
     """Search for recipes by query."""
     start_time = time.time()
 
     # Generate cache key
-    cache_key = generate_cache_key(q, limit, include_videos)
+    cache_key = generate_cache_key(q, limit, include_videos, ingredients, cuisine, difficulty, tags)
 
     # Check cache first
     if use_cache:
@@ -65,17 +69,23 @@ async def search_recipes(
             return RecipeSearchResponse(**cached_result)
 
     try:
-        # Check database first
-        db_recipes = await get_recipes_by_query(db, query=q, limit=limit)
+        # Use AI for semantic search if enabled and API key is present
+        refined_query = q
+        if settings.GEMINI_API_KEY:
+            refined_query = await ai_service.get_semantic_search_query(q)
+            logger.info(f"Original query: {q}, Refined query (AI): {refined_query}")
+
+        # Check database first with refined query
+        db_recipes = await get_recipes_by_query(db, query=refined_query, limit=limit, ingredients=ingredients, cuisine=cuisine, difficulty=difficulty, tags=tags)
         if db_recipes:
             search_time = time.time() - start_time
             video_results = None
             if include_videos:
-                video_results = video_scraper.get_youtube_videos(q, max_results=5)
+                video_results = video_scraper.get_youtube_videos(refined_query, max_results=5)
             result = {
                 "recipes": db_recipes,
                 "total_found": len(db_recipes),
-                "query": q,
+                "query": refined_query,
                 "search_time": search_time,
                 "cached": False,
                 "video_results": video_results
@@ -85,7 +95,7 @@ async def search_recipes(
             return RecipeSearchResponse(**result)
 
         # If not in DB, scrape recipes
-        recipes = await scraper.search_recipes(q, limit, include_videos)
+        recipes = await scraper.search_recipes(refined_query, limit, include_videos)
 
         # Save recipes to DB
         for recipe in recipes:
@@ -96,14 +106,14 @@ async def search_recipes(
         # Get video results if requested
         video_results = None
         if include_videos:
-            video_results = video_scraper.get_youtube_videos(q, max_results=5)
+            video_results = video_scraper.get_youtube_videos(refined_query, max_results=5)
 
         search_time = time.time() - start_time
 
         result = {
             "recipes": recipes,
             "total_found": len(recipes),
-            "query": q,
+            "query": refined_query,
             "search_time": search_time,
             "cached": False,
             "video_results": video_results
@@ -125,18 +135,43 @@ async def search_recipes_post(search_query: SearchQuery):
     """Search for recipes using POST method with detailed parameters."""
     start_time = time.time()
 
-    cache_key = generate_cache_key(search_query.query, search_query.max_results, search_query.include_videos)
+    cache_key = generate_cache_key(search_query.query, search_query.max_results, search_query.include_videos, search_query.ingredients_filter, search_query.cuisine_filter, search_query.difficulty_filter, search_query.tags_filter)
 
     # Check cache
     cached_result = cache.get(cache_key)
-    if cached_result:
+    if search_query.use_cache and cached_result:
         cached_result["search_time"] = time.time() - start_time
         cached_result["cached"] = True
         return RecipeSearchResponse(**cached_result)
 
     try:
-        recipes = await scraper.search_recipes(search_query.query, search_query.max_results,
-                                               search_query.include_videos)
+        # Use AI for semantic search if enabled and API key is present
+        refined_query = search_query.query
+        if settings.GEMINI_API_KEY:
+            refined_query = await ai_service.get_semantic_search_query(search_query.query)
+            logger.info(f"Original query: {search_query.query}, Refined query (AI): {refined_query}")
+
+        # Check database first with refined query
+        db_recipes = await get_recipes_by_query(db, query=refined_query, limit=search_query.max_results, ingredients=search_query.ingredients_filter, cuisine=search_query.cuisine_filter, difficulty=search_query.difficulty_filter, tags=search_query.tags_filter)
+        if db_recipes:
+            search_time = time.time() - start_time
+            video_results = None
+            if search_query.include_videos:
+                video_results = video_scraper.get_youtube_videos(refined_query, max_results=5)
+            result = {
+                "recipes": db_recipes,
+                "total_found": len(db_recipes),
+                "query": refined_query,
+                "search_time": search_time,
+                "cached": False,
+                "video_results": video_results
+            }
+            if search_query.use_cache:
+                cache.set(cache_key, result)
+            return RecipeSearchResponse(**result)
+
+        recipes = await scraper.search_recipes(refined_query, search_query.max_results,
+                                               search_query.include_videos, search_query.ingredients_filter, search_query.cuisine_filter, search_query.difficulty_filter, search_query.tags_filter)
 
         # Apply filters
         if search_query.difficulty_filter:
@@ -144,26 +179,27 @@ async def search_recipes_post(search_query: SearchQuery):
 
         if search_query.max_time_minutes:
             # Filter by total time (simplified)
-            recipes = [r for r in recipes if
+            recipes = [r for r in recipes if\
                        r.time_info.get('total_time', '0') <= str(search_query.max_time_minutes)]
 
         # Get video results if requested
         video_results = None
         if search_query.include_videos:
-            video_results = video_scraper.get_youtube_videos(search_query.query, max_results=5)
+            video_results = video_scraper.get_youtube_videos(refined_query, max_results=5)
 
         search_time = time.time() - start_time
 
         result = {
             "recipes": recipes,
             "total_found": len(recipes),
-            "query": search_query.query,
+            "query": refined_query,
             "search_time": search_time,
             "cached": False,
             "video_results": video_results
         }
 
-        cache.set(cache_key, result)
+        if search_query.use_cache:
+            cache.set(cache_key, result)
 
         return RecipeSearchResponse(**result)
 
@@ -340,17 +376,20 @@ async def get_trending_recipes(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.get("/meal-plan/generate")
+@router.get("/meal-plan/generate", response_model=MealPlan)
 async def generate_meal_plan(
         days: int = Query(default=7, ge=1, le=14, description="Number of days for meal plan"),
-        dietary_restrictions: Optional[str] = Query(default=None,
+        dietary_restrictions: Optional[str] = Query(default=None,\
                                                     description="Dietary restrictions (vegetarian, vegan, gluten-free, etc.)"),
-        cuisine_type: Optional[str] = Query(default=None, description="Preferred cuisine type")
+        cuisine_type: Optional[str] = Query(default=None, description="Preferred cuisine type"),
+        current_user: User = Depends(deps.get_current_active_user),\
+        db: AsyncSession = Depends(get_db)
 ):
     """Generate a meal plan for specified number of days."""
     try:
         meal_types = ["breakfast", "lunch", "dinner"]
-        meal_plan = []
+        meal_plan_data = []
+        all_ingredients = []
 
         for day in range(days):
             day_meals = {}
@@ -367,21 +406,36 @@ async def generate_meal_plan(
                 # Get recipes for this meal
                 recipes = await scraper.search_recipes(search_query, max_results=1, include_videos=False)
                 if recipes:
-                    day_meals[meal_type] = recipes[0]
+                    day_meals[meal_type] = recipes[0].dict()  # Convert Recipe object to dict
+                    all_ingredients.extend(recipes[0].ingredients)
 
-            meal_plan.append({
+            meal_plan_data.append({
                 "date": date_str,
                 "meals": day_meals,
-                "total_nutrition": {},  # Could calculate this from recipes
-                "shopping_list": []  # Could generate from ingredients
             })
+        
+        # Generate shopping list (simple deduplication)
+        shopping_list = sorted(list(set(all_ingredients)))
 
-        return {
-            "meal_plan": meal_plan,
-            "duration_days": days,
-            "dietary_restrictions": dietary_restrictions,
-            "cuisine_type": cuisine_type
-        }
+        # Placeholder for total nutrition
+        total_nutrition = {"calories": "N/A", "protein": "N/A"}
+
+        meal_plan_name = f"Meal Plan for {days} days - {datetime.now().strftime('%Y-%m-%d')}"
+        meal_plan_obj = MealPlanCreate(
+            name=meal_plan_name,
+            plan_data={
+                "meal_plan": meal_plan_data,
+                "duration_days": days,
+                "dietary_restrictions": dietary_restrictions,
+                "cuisine_type": cuisine_type,
+                "shopping_list": shopping_list,
+                "total_nutrition": total_nutrition
+            }
+        )
+        
+        saved_meal_plan = await create_meal_plan(db, meal_plan_obj, current_user.id)
+
+        return saved_meal_plan
 
     except Exception as e:
         logger.error(f"Error generating meal plan: {e}")
@@ -692,3 +746,28 @@ async def advanced_search(
     except Exception as e:
         logger.error(f"Error in advanced search: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.post("/generate-from-ingredients")
+async def generate_recipe_from_ingredients_endpoint(
+    ingredients: List[str],
+    current_user: User = Depends(deps.get_current_active_user)
+):
+    """Generate a recipe based on a list of ingredients using AI."""
+    if not settings.GEMINI_API_KEY:
+        raise HTTPException(status_code=501, detail="AI features are not enabled (GEMINI_API_KEY is missing).")
+    
+    generated_recipe = await ai_service.generate_recipe_from_ingredients(ingredients)
+    return {"generated_recipe": generated_recipe}
+
+@router.post("/suggest-substitute")
+async def suggest_ingredient_substitute_endpoint(
+    original_ingredient: str,
+    recipe_context: Optional[str] = None,
+    current_user: User = Depends(deps.get_current_active_user)
+):
+    """Suggest a substitute for an ingredient using AI."""
+    if not settings.GEMINI_API_KEY:
+        raise HTTPException(status_code=501, detail="AI features are not enabled (GEMINI_API_KEY is missing).")
+    
+    suggested_substitute = await ai_service.suggest_ingredient_substitute(original_ingredient, recipe_context)
+    return {"suggested_substitute": suggested_substitute}

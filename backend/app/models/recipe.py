@@ -1,6 +1,7 @@
 from sqlalchemy import Column, Integer, String, DateTime, JSON
 from app.db.session import Base
 from sqlalchemy.orm import relationship
+from .cookbook import cookbook_recipe_association
 
 
 class Recipe(Base):
@@ -24,3 +25,4 @@ class Recipe(Base):
 
     ratings = relationship("Rating", back_populates="recipe")
     reviews = relationship("Review", back_populates="recipe")
+    cookbooks = relationship("Cookbook", secondary=cookbook_recipe_association, back_populates="recipes")

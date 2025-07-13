@@ -13,12 +13,10 @@ from app.api.v1.api import api_router
 from app.core.settings import settings
 from app.db.session import create_tables, db_manager
 from app.services.cache import rate_limiter
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler()] # Log to stdout/stderr for containerized environments
-)
+from app.core.logging_config import configure_logging # Import the new logging config
+
+# Configure logging early
+configure_logging(settings.LOG_LEVEL)
 logger = logging.getLogger(__name__)
 
 
@@ -40,13 +38,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
-    """Rate limiting middleware."""
+    """Rate limiting middleware (in-memory only for Fly.io optimization)."""
     
     async def dispatch(self, request: Request, call_next):
-        # Only apply rate limiting if Redis is configured
-        if not settings.REDIS_URL:
-            return await call_next(request)
-
         # Skip rate limiting for health checks and static files
         if request.url.path in ["/health", "/docs", "/redoc", "/openapi.json"]:
             return await call_next(request)
@@ -59,6 +53,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # Check rate limit
         rate_limit_key = f"rate_limit:{client_ip}"
         if not rate_limiter.is_allowed(rate_limit_key, settings.RATE_LIMIT_PER_MINUTE, 60):
+            logger.warning(f"Rate limit exceeded for IP: {client_ip}")
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail="Rate limit exceeded. Please try again later."
@@ -114,14 +109,6 @@ async def lifespan(app: FastAPI):
     else:
         logger.error("Database connection failed")
     
-    # Check cache connectivity
-    from app.services.cache import cache
-    if settings.REDIS_URL:
-        cache_stats = cache.get_stats()
-        logger.info(f"Cache initialized: {cache_stats.get('backend', 'unknown')}")
-    else:
-        logger.info("Cache initialized: in-memory (Redis not configured)")
-    
     yield
     
     # Shutdown
@@ -168,43 +155,35 @@ async def health_check():
     # Check database
     db_healthy = await db_manager.health_check()
     
-    # Check cache
-    from app.services.cache import cache
-    cache_status = "in-memory"
-    cache_healthy = True
-    cache_details = {"backend": "in-memory", "status": "ok"}
-
-    if settings.REDIS_URL:
-        cache_details = cache.get_stats()
-        cache_healthy = "error" not in cache_details
-        cache_status = "healthy" if cache_healthy else "unhealthy"
-    
     # Overall health
-    healthy = db_healthy  # Cache is not critical for overall health if in-memory
+    healthy = db_healthy
     
-    return {
-        "status": "healthy" if healthy else "unhealthy",
-        "timestamp": time.time(),
-        "version": settings.APP_VERSION,
-        "database": {
-            "status": "healthy" if db_healthy else "unhealthy",
-            "connection_info": await db_manager.get_connection_info() if db_healthy else None
-        },
-        "cache": {
-            "stats": cache_stats
+    status_code = status.HTTP_200_OK if healthy else status.HTTP_503_SERVICE_UNAVAILABLE
+
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "status": "healthy" if healthy else "unhealthy",
+            "timestamp": time.time(),
+            "version": settings.APP_VERSION,
+            "database": {
+                "status": "healthy" if db_healthy else "unhealthy",
+                "connection_info": await db_manager.get_connection_info() if db_healthy else None
+            },
+            "dependencies": {
+                "gemini_api": "configured" if settings.GEMINI_API_KEY else "not configured",
+                "youtube_api": "configured" if settings.YOUTUBE_API_KEY else "not configured",
+            }
         }
-    }
+    )
 
 
-# Metrics endpoint
+# Metrics endpoint (simplified for Fly.io optimization)
 @app.get("/metrics")
 async def get_metrics():
     """Get application metrics."""
-    from app.services.cache import cache
-    
     return {
         "database": await db_manager.get_connection_info(),
-        "cache": cache.get_stats(),
         "application": {
             "version": settings.APP_VERSION,
             "debug_mode": settings.DEBUG
@@ -213,35 +192,9 @@ async def get_metrics():
 
 
 # Global exception handlers
-@app.exception_handler(404)
-async def not_found_handler(request: Request, exc):
-    """Handle 404 errors."""
-    return JSONResponse(
-        status_code=404,
-        content={
-            "detail": "Endpoint not found",
-            "path": str(request.url.path),
-            "method": request.method
-        }
-    )
-
-
-@app.exception_handler(500)
-async def internal_error_handler(request: Request, exc):
-    """Handle 500 errors."""
-    logger.error(f"Internal server error: {exc}")
-    return JSONResponse(
-        status_code=500,
-        content={
-            "detail": "Internal server error",
-            "request_id": request.headers.get("X-Request-ID", "unknown")
-        }
-    )
-
-
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
-    """Handle HTTP exceptions with enhanced error information."""
+    logger.warning(f"HTTP Exception: {exc.status_code} - {exc.detail} for {request.method} {request.url.path}")
     return JSONResponse(
         status_code=exc.status_code,
         content={
@@ -249,6 +202,20 @@ async def http_exception_handler(request: Request, exc: HTTPException):
             "status_code": exc.status_code,
             "path": str(request.url.path),
             "method": request.method,
+            "timestamp": time.time()
+        }
+    )
+
+
+@app.exception_handler(Exception)
+async def generic_exception_handler(request: Request, exc: Exception):
+    request_id = request.headers.get("X-Request-ID", "unknown")
+    logger.exception(f"Unhandled exception for Request ID: {request_id}") # Logs traceback
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={
+            "detail": "Internal server error",
+            "request_id": request_id,
             "timestamp": time.time()
         }
     )
@@ -274,4 +241,4 @@ async def startup_event():
     logger.info(f"Recipe Scraper API v{settings.APP_VERSION} started successfully")
     logger.info(f"Debug mode: {settings.DEBUG}")
     logger.info(f"Database URL: {settings.DATABASE_URL.split('@')[1] if '@' in settings.DATABASE_URL else 'Not configured'}")
-    logger.info(f"Cache backend: Redis" if "redis" in settings.REDIS_URL else "Memory")
+    logger.info("Cache backend: In-memory (Redis removed for optimization)")

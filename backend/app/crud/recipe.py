@@ -24,8 +24,25 @@ async def get_recipe_by_url(db: Session, url: str):
     return None
 
 
-async def get_recipes_by_query(db: Session, query: str, skip: int = 0, limit: int = 100):
-    result = await db.execute(select(RecipeModel).filter(RecipeModel.title.ilike(f"%{query}%")).offset(skip).limit(limit))
+async def get_recipes_by_query(db: Session, query: str, skip: int = 0, limit: int = 100, ingredients: Optional[str] = None, cuisine: Optional[str] = None, difficulty: Optional[str] = None, tags: Optional[str] = None):
+    stmt = select(RecipeModel).filter(RecipeModel.title.ilike(f"%{query}%"))
+
+    if ingredients:
+        for ingredient in ingredients.split(","):
+            stmt = stmt.filter(RecipeModel.ingredients.contains([ingredient.strip()]))
+
+    if cuisine:
+        stmt = stmt.filter(RecipeModel.tags.contains([cuisine.strip()]))
+
+    if difficulty:
+        stmt = stmt.filter(RecipeModel.difficulty == difficulty.strip())
+
+    if tags:
+        for tag in tags.split(","):
+            stmt = stmt.filter(RecipeModel.tags.contains([tag.strip()]))
+
+    stmt = stmt.offset(skip).limit(limit)
+    result = await db.execute(stmt)
     db_recipes = result.scalars().all()
     
     # Add computed fields to each recipe

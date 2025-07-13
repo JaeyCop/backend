@@ -18,7 +18,6 @@ depends_on = None
 
 def upgrade() -> None:
     # Add new columns to users table
-    op.add_column('users', sa.Column('is_superuser', sa.Boolean(), nullable=False, server_default='false'))
     op.add_column('users', sa.Column('first_name', sa.String(), nullable=True))
     op.add_column('users', sa.Column('last_name', sa.String(), nullable=True))
     op.add_column('users', sa.Column('bio', sa.Text(), nullable=True))
@@ -42,7 +41,6 @@ def upgrade() -> None:
     op.create_index('ix_users_created_at', 'users', ['created_at'])
     op.create_index('ix_users_last_login', 'users', ['last_login'])
     op.create_index('ix_users_email_verified', 'users', ['email_verified'])
-    op.create_index('ix_users_is_superuser', 'users', ['is_superuser'])
     
     # Create trigger for updated_at timestamp (PostgreSQL specific)
     op.execute("""
@@ -53,14 +51,16 @@ def upgrade() -> None:
             RETURN NEW;
         END;
         $$ language 'plpgsql';
-    """)
+    """
+    )
     
     op.execute("""
         CREATE TRIGGER update_users_updated_at 
         BEFORE UPDATE ON users 
         FOR EACH ROW 
         EXECUTE FUNCTION update_updated_at_column();
-    """)
+    """
+    )
 
 
 def downgrade() -> None:
@@ -69,7 +69,6 @@ def downgrade() -> None:
     op.execute("DROP FUNCTION IF EXISTS update_updated_at_column();")
     
     # Drop indexes
-    op.drop_index('ix_users_is_superuser', table_name='users')
     op.drop_index('ix_users_email_verified', table_name='users')
     op.drop_index('ix_users_last_login', table_name='users')
     op.drop_index('ix_users_created_at', table_name='users')
@@ -93,4 +92,3 @@ def downgrade() -> None:
     op.drop_column('users', 'bio')
     op.drop_column('users', 'last_name')
     op.drop_column('users', 'first_name')
-    op.drop_column('users', 'is_superuser')

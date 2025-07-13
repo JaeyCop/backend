@@ -1,6 +1,7 @@
 import json
 import pickle
 import logging
+import hashlib # Added for MD5 hashing
 from typing import Any, Optional, List
 from datetime import timedelta
 import asyncio
@@ -106,6 +107,14 @@ class CacheManager:
 
 # Global cache instance
 cache = CacheManager()
+
+
+def generate_cache_key(*args: Any) -> str:
+    """Generates a consistent cache key from a set of arguments."""
+    # Convert all arguments to strings and join them
+    key_string = "_".join(str(arg) for arg in args if arg is not None)
+    # Use MD5 hash for a compact and consistent key
+    return hashlib.md5(key_string.encode('utf-8')).hexdigest()
 
 
 def cache_result(key_prefix: str, ttl: Optional[int] = None):

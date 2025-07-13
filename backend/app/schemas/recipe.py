@@ -1,6 +1,10 @@
+from __future__ import annotations
 from pydantic import BaseModel, Field, HttpUrl
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, TYPE_CHECKING
 from datetime import datetime
+
+if TYPE_CHECKING:
+    from .cookbook import Cookbook
 
 
 class Recipe(BaseModel):
@@ -21,7 +25,7 @@ class Recipe(BaseModel):
 
     average_rating: Optional[float] = None
     review_count: int = 0
-    cookbooks: List[Cookbook] = []
+    cookbooks: List["Cookbook"] = []
 
 
 class RecipeSearchResponse(BaseModel):
@@ -81,3 +85,4 @@ class VideoTutorial(BaseModel):
     thumbnail: Optional[str] = None
     channel: Optional[str] = None
     views: Optional[str] = None
+

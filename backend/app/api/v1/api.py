@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import recipes, utils, users, ratings, reviews, cookbooks
+from app.api.v1.endpoints import recipes, utils, users, ratings, reviews, cookbooks, follows, user_recipes, meal_plans, notifications
 
 api_router = APIRouter()
 api_router.include_router(recipes.router, prefix="/recipes", tags=["recipes"])

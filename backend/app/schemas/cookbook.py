@@ -1,7 +1,10 @@
 
+from __future__ import annotations
 from pydantic import BaseModel
-from typing import List, Optional
-from .recipe import Recipe
+from typing import List, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .recipe import Recipe
 
 class CookbookBase(BaseModel):
     name: str
@@ -16,7 +19,8 @@ class CookbookUpdate(CookbookBase):
 class Cookbook(CookbookBase):
     id: int
     owner_id: int
-    recipes: List[Recipe] = []
+    recipes: List["Recipe"] = []
 
     class Config:
-        orm_mode = True
+        from_attributes = True
+

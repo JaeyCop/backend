@@ -15,9 +15,34 @@ from app.db.session import create_tables, db_manager
 from app.services.cache import rate_limiter
 from app.core.logging_config import configure_logging # Import the new logging config
 
+# Import all schemas to ensure they are loaded before rebuild
+from app.schemas.recipe import Recipe, RecipeSearchResponse, RecipeDetailResponse, RecipeRecommendationResponse
+from app.schemas.cookbook import Cookbook
+from app.schemas.user import User, UserCreate, UserUpdate, UserPasswordChange, UserInDBBase, UserInDB, UserStats
+
+# Explicitly rebuild models with circular dependencies immediately after import
+Recipe.model_rebuild()
+Cookbook.model_rebuild()
+
+
 # Configure logging early
 configure_logging(settings.LOG_LEVEL)
 logger = logging.getLogger(__name__)
+
+
+def rebuild_pydantic_models():
+    """Explicitly rebuild Pydantic models to resolve forward references."""
+    # Only rebuild models that don't have circular dependencies or have already been handled
+    RecipeSearchResponse.model_rebuild()
+    RecipeDetailResponse.model_rebuild()
+    RecipeRecommendationResponse.model_rebuild()
+    User.model_rebuild()
+    UserCreate.model_rebuild()
+    UserUpdate.model_rebuild()
+    UserPasswordChange.model_rebuild()
+    UserInDBBase.model_rebuild()
+    UserInDB.model_rebuild()
+    UserStats.model_rebuild()
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -32,7 +57,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        response.headers["Content-Security-Policy"] = "default-src 'self'"
+        response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' https://fastapi.tiangolo.com data:;"
         
         return response
 
@@ -95,6 +120,8 @@ async def lifespan(app: FastAPI):
     """Application lifespan events."""
     # Startup
     logger.info("Starting up Recipe Scraper API...")
+    rebuild_pydantic_models()
+    logger.info("Pydantic models rebuilt successfully.")
     
     # Create database tables
     try:

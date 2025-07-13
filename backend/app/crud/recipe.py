@@ -1,6 +1,7 @@
 from sqlalchemy.orm import Session
 from sqlalchemy.future import select
 from sqlalchemy import func
+from typing import Optional
 from app.models.recipe import Recipe as RecipeModel
 from app.models.rating import Rating
 from app.schemas.recipe import Recipe as RecipeSchema

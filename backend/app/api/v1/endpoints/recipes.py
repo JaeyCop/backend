@@ -9,7 +9,7 @@ from typing import Optional, List
 import aiohttp
 from fastapi import APIRouter, Query, HTTPException, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-
+from sqlalchemy.orm import Session
 from app.db.session import SessionLocal
 from app.schemas.recipe import (
     RecipeSearchResponse,
@@ -17,7 +17,12 @@ from app.schemas.recipe import (
     RecipeDetailResponse,
     RecipeRecommendationResponse, NutritionAnalysis, Recipe
 )
-from app.services.cache import cache
+from app.schemas.meal_plan import MealPlan, MealPlanCreate
+from app.crud.meal_plan import create_meal_plan
+from app.models.user import User
+from app.api import deps
+from app.api import deps
+from app.services.cache import cache, generate_cache_key # Added generate_cache_key
 from app.services.scraper import scraper
 from app.services.video_scraper import video_scraper
 from pydantic import HttpUrl

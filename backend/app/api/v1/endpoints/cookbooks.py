@@ -1,84 +1,90 @@
-
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
 from typing import List
-
-from app import crud
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
 from app.api import deps
+from app.crud import cookbook as crud_cookbook
+from app.models import User
 from app.schemas.cookbook import Cookbook, CookbookCreate, CookbookUpdate
-from app.models.user import User
 
 router = APIRouter()
 
 @router.post("/", response_model=Cookbook)
-def create_cookbook(
-    *, 
-    db: Session = Depends(deps.get_db),
+async def create_cookbook(
     cookbook_in: CookbookCreate,
-    current_user: User = Depends(deps.get_current_active_user)
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_user),
 ):
-    cookbook = crud.cookbook.create_cookbook(
-        db=db, cookbook=cookbook_in, user_id=current_user.id
-    )
+    """
+    Create new cookbook.
+    """
+    cookbook = await crud_cookbook.create_cookbook(db=db, cookbook=cookbook_in, owner_id=current_user.id)
     return cookbook
+
 
 @router.get("/{cookbook_id}", response_model=Cookbook)
-def read_cookbook(
-    *, 
-    db: Session = Depends(deps.get_db),
+async def read_cookbook(
     cookbook_id: int,
-    current_user: User = Depends(deps.get_current_active_user)
+    db: AsyncSession = Depends(deps.get_db),
 ):
-    cookbook = crud.cookbook.get_cookbook(db=db, cookbook_id=cookbook_id)
-    if not cookbook:
+    """
+    Get cookbook by ID.
+    """
+    db_cookbook = await crud_cookbook.get_cookbook(db=db, cookbook_id=cookbook_id)
+    if db_cookbook is None:
         raise HTTPException(status_code=404, detail="Cookbook not found")
-    if cookbook.owner_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Not enough permissions")
-    return cookbook
+    return db_cookbook
 
-@router.get("/user/{user_id}", response_model=List[Cookbook])
-def read_cookbooks_by_user(
-    *, 
-    db: Session = Depends(deps.get_db),
-    user_id: int,
+
+@router.get("/", response_model=List[Cookbook])
+async def read_cookbooks(
+    db: AsyncSession = Depends(deps.get_db),
     skip: int = 0,
     limit: int = 100,
-    current_user: User = Depends(deps.get_current_active_user)
+    current_user: User = Depends(deps.get_current_active_user),
 ):
-    cookbooks = crud.cookbook.get_cookbooks_by_user(
-        db=db, user_id=user_id, skip=skip, limit=limit
+    """
+    Retrieve cookbooks for the current user.
+    """
+    cookbooks = await crud_cookbook.get_cookbooks_by_owner(
+        db=db, owner_id=current_user.id, skip=skip, limit=limit
     )
     return cookbooks
 
+
 @router.put("/{cookbook_id}", response_model=Cookbook)
-def update_cookbook(
-    *, 
-    db: Session = Depends(deps.get_db),
+async def update_cookbook(
     cookbook_id: int,
     cookbook_in: CookbookUpdate,
-    current_user: User = Depends(deps.get_current_active_user)
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_user),
 ):
-    cookbook = crud.cookbook.get_cookbook(db=db, cookbook_id=cookbook_id)
-    if not cookbook:
+    """
+    Update a cookbook.
+    """
+    db_cookbook = await crud_cookbook.get_cookbook(db=db, cookbook_id=cookbook_id)
+    if db_cookbook is None:
         raise HTTPException(status_code=404, detail="Cookbook not found")
-    if cookbook.owner_id != current_user.id:
+    if db_cookbook.owner_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not enough permissions")
-    cookbook = crud.cookbook.update_cookbook(
+    cookbook = await crud_cookbook.update_cookbook(
         db=db, cookbook_id=cookbook_id, cookbook=cookbook_in
     )
     return cookbook
 
+
 @router.delete("/{cookbook_id}", response_model=Cookbook)
-def delete_cookbook(
-    *, 
-    db: Session = Depends(deps.get_db),
+async def delete_cookbook(
     cookbook_id: int,
-    current_user: User = Depends(deps.get_current_active_user)
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_user),
 ):
-    cookbook = crud.cookbook.get_cookbook(db=db, cookbook_id=cookbook_id)
-    if not cookbook:
+    """
+    Delete a cookbook.
+    """
+    db_cookbook = await crud_cookbook.get_cookbook(db=db, cookbook_id=cookbook_id)
+    if db_cookbook is None:
         raise HTTPException(status_code=404, detail="Cookbook not found")
-    if cookbook.owner_id != current_user.id:
+    if db_cookbook.owner_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not enough permissions")
-    cookbook = crud.cookbook.delete_cookbook(db=db, cookbook_id=cookbook_id)
+    cookbook = await crud_cookbook.delete_cookbook(db=db, cookbook_id=cookbook_id)
     return cookbook

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, validator, Field
+from pydantic import BaseModel, EmailStr, validator, Field, HttpUrl
 from typing import Optional, List
 from datetime import datetime
 import json
@@ -20,3 +20,30 @@ class UserBase(BaseModel):
 
 
 
+
+class UserCreate(UserBase):
+    password: str
+
+class UserUpdate(UserBase):
+    password: Optional[str] = None
+
+class UserPasswordChange(BaseModel):
+    current_password: str
+    new_password: str
+
+class UserInDBBase(UserBase):
+    id: Optional[int] = None
+
+    class Config:
+        from_attributes = True
+
+class UserInDB(UserInDBBase):
+    hashed_password: str
+
+class User(UserInDBBase):
+    pass
+
+class UserStats(BaseModel):
+    recipe_count: int = 0
+    follower_count: int = 0
+    following_count: int = 0

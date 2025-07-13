@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     # Application
     APP_NAME: str = "Recipe Scraper API"
     APP_VERSION: str = "2.0.0"
-    DEBUG: bool = False
+    DEBUG: bool = os.getenv("DEBUG", "False").lower() == "true"
     
     # Security
     SECRET_KEY: str = os.getenv("SECRET_KEY", "your-super-secret-key-change-this-in-production")
